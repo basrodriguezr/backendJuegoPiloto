@@ -13,9 +13,10 @@ jobs:
 
       - name: Build backend
         run: |
-          docker build -t piloto-backend ./backend
+          docker build -t piloto-backend .
 
       - name: Build frontend
+        if: ${{ hashFiles('frontend/Dockerfile') != '' }}
         run: |
           docker build -t piloto-frontend \
             --build-arg NEXT_PUBLIC_WS_URL=ws://127.0.0.1:4000/ws \
@@ -52,6 +53,7 @@ jobs:
             piloto-backend
 
       - name: Run frontend
+        if: ${{ hashFiles('frontend/Dockerfile') != '' }}
         run: |
           docker rm -f piloto-frontend || true
           docker run -d --name piloto-frontend \
