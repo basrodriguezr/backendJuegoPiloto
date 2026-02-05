@@ -3,6 +3,7 @@ import http from "http";
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
+import client from "prom-client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { WebSocketServer } from "ws";
@@ -20,6 +21,25 @@ if (!process.env.JWT_SECRET) {
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("dev"));
+
+const metricsRegistry = new client.Registry();
+client.collectDefaultMetrics({ register: metricsRegistry });
+const httpHistogram = new client.Histogram({
+  name: "http_request_duration_seconds",
+  help: "HTTP request duration in seconds",
+  labelNames: ["method", "route", "status_code"],
+  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+});
+metricsRegistry.registerMetric(httpHistogram);
+
+app.use((req, res, next) => {
+  const end = httpHistogram.startTimer();
+  res.on("finish", () => {
+    const route = req.route?.path ?? req.path ?? "unknown";
+    end({ method: req.method, route, status_code: res.statusCode });
+  });
+  next();
+});
 
 function createError(status, message) {
   const err = new Error(message);
@@ -100,6 +120,11 @@ function authMiddleware(req, res, next) {
 
 app.get("/api/v1/health", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+app.get("/metrics", async (_req, res) => {
+  res.set("Content-Type", metricsRegistry.contentType);
+  res.end(await metricsRegistry.metrics());
 });
 
 app.post("/api/v1/auth/register", async (req, res) => {

@@ -15,16 +15,6 @@ jobs:
         run: |
           docker build -t piloto-backend .
 
-      - name: Build frontend
-        if: ${{ hashFiles('frontend/Dockerfile') != '' }}
-        run: |
-          docker build -t piloto-frontend \
-            --build-arg NEXT_PUBLIC_WS_URL=ws://127.0.0.1:4000/ws \
-            --build-arg NEXT_PUBLIC_CLIENT_CODE=acme \
-            --build-arg NEXT_PUBLIC_COMPANY_CODE=acme \
-            --build-arg NEXT_PUBLIC_GAME_CODE=e-instant \
-            ./frontend
-
       - name: Run backend
         run: |
           docker rm -f piloto-backend || true
@@ -35,12 +25,3 @@ jobs:
             -p 4000:4000 \
             --restart unless-stopped \
             piloto-backend
-
-      - name: Run frontend
-        if: ${{ hashFiles('frontend/Dockerfile') != '' }}
-        run: |
-          docker rm -f piloto-frontend || true
-          docker run -d --name piloto-frontend \
-            -p 3000:3000 \
-            --restart unless-stopped \
-            piloto-frontend
