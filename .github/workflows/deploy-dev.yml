@@ -25,28 +25,12 @@ jobs:
             --build-arg NEXT_PUBLIC_GAME_CODE=e-instant \
             ./frontend
 
-      - name: Run postgres
-        run: |
-          docker network create piloto_net || true
-          docker volume create piloto_db || true
-          docker rm -f piloto-db || true
-          docker run -d --name piloto-db \
-            --network piloto_net \
-            -e POSTGRES_DB=piloto \
-            -e POSTGRES_USER=postgres \
-            -e POSTGRES_PASSWORD=postgres \
-            -v piloto_db:/var/lib/postgresql/data \
-            -p 5432:5432 \
-            --restart unless-stopped \
-            postgres:16
-
       - name: Run backend
         run: |
           docker rm -f piloto-backend || true
           docker run -d --name piloto-backend \
-            --network piloto_net \
-            -e DATABASE_URL=postgres://postgres:postgres@piloto-db:5432/piloto \
-            -e JWT_SECRET=dev-secret \
+            --add-host=host.docker.internal:host-gateway \
+            --env-file /etc/piloto/backend.env \
             -e PORT=4000 \
             -p 4000:4000 \
             --restart unless-stopped \
