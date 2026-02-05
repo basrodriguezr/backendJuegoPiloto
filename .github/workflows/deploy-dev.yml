@@ -1,0 +1,60 @@
+name: Deploy Dev (VM)
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend
+        run: |
+          docker build -t piloto-backend ./backend
+
+      - name: Build frontend
+        run: |
+          docker build -t piloto-frontend \
+            --build-arg NEXT_PUBLIC_WS_URL=ws://127.0.0.1:4000/ws \
+            --build-arg NEXT_PUBLIC_CLIENT_CODE=acme \
+            --build-arg NEXT_PUBLIC_COMPANY_CODE=acme \
+            --build-arg NEXT_PUBLIC_GAME_CODE=e-instant \
+            ./frontend
+
+      - name: Run postgres
+        run: |
+          docker network create piloto_net || true
+          docker volume create piloto_db || true
+          docker rm -f piloto-db || true
+          docker run -d --name piloto-db \
+            --network piloto_net \
+            -e POSTGRES_DB=piloto \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -v piloto_db:/var/lib/postgresql/data \
+            -p 5432:5432 \
+            --restart unless-stopped \
+            postgres:16
+
+      - name: Run backend
+        run: |
+          docker rm -f piloto-backend || true
+          docker run -d --name piloto-backend \
+            --network piloto_net \
+            -e DATABASE_URL=postgres://postgres:postgres@piloto-db:5432/piloto \
+            -e JWT_SECRET=dev-secret \
+            -e PORT=4000 \
+            -p 4000:4000 \
+            --restart unless-stopped \
+            piloto-backend
+
+      - name: Run frontend
+        run: |
+          docker rm -f piloto-frontend || true
+          docker run -d --name piloto-frontend \
+            -p 3000:3000 \
+            --restart unless-stopped \
+            piloto-frontend
