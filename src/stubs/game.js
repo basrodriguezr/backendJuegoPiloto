@@ -1,6 +1,6 @@
 import { MATCH_PAYTABLES, PAY_SYMBOLS, getMatchMultiplier } from "./paytable.js";
 
-const LEVEL_ONE_SIZE = { rows: 3, cols: 3 };
+const LEVEL_ONE_SIZE = { rows: 5, cols: 4 };
 const LEVEL_TWO_SIZE = { rows: 7, cols: 5 };
 const MAX_CASCADES = 20;
 const BET_VALUES = [200, 300, 400, 500, 1000, 2000, 5000, 10000];
@@ -53,7 +53,7 @@ function buildGrid(rows, cols, weights) {
   );
 }
 
-function findClusters(grid) {
+function findClusters(grid, { includeDiagonals = false } = {}) {
   const rows = grid.length;
   const cols = grid[0] ? grid[0].length : 0;
   const visited = Array.from({ length: rows }, () => Array.from({ length: cols }, () => false));
@@ -83,6 +83,14 @@ function findClusters(grid) {
           { row: current.row, col: current.col - 1 },
           { row: current.row, col: current.col + 1 }
         ];
+        if (includeDiagonals) {
+          neighbors.push(
+            { row: current.row - 1, col: current.col - 1 },
+            { row: current.row - 1, col: current.col + 1 },
+            { row: current.row + 1, col: current.col - 1 },
+            { row: current.row + 1, col: current.col + 1 }
+          );
+        }
 
         neighbors.forEach((next) => {
           if (
@@ -145,13 +153,21 @@ function applyCascadeStep(grid, step) {
   return result;
 }
 
-function buildCascades(grid0, weights, bet) {
+function applyReplaceStep(grid, removeCells, weights) {
+  const result = grid.map((row) => [...row]);
+  removeCells.forEach((cell) => {
+    result[cell.row][cell.col] = pickSymbol(weights);
+  });
+  return result;
+}
+
+function buildCascades(grid0, weights, bet, { includeDiagonals = false, fillMode = "cascade" } = {}) {
   const cascades = [];
   let totalWin = 0;
   let grid = grid0;
 
   for (let stepIndex = 0; stepIndex < MAX_CASCADES; stepIndex += 1) {
-    const clusters = findClusters(grid);
+    const clusters = findClusters(grid, { includeDiagonals });
     if (clusters.length === 0) break;
 
     clusters.sort((a, b) => {
@@ -170,17 +186,23 @@ function buildCascades(grid0, weights, bet) {
     removeCells.forEach((cell) => {
       removedByCol.set(cell.col, (removedByCol.get(cell.col) ?? 0) + 1);
     });
+    let dropIn = [];
+    let nextGrid;
 
-    const dropIn = Array.from(removedByCol.entries()).map(([col, count]) => ({
-      col,
-      symbols: Array.from({ length: count }, () => pickSymbol(weights))
-    }));
+    if (fillMode === "replace") {
+      nextGrid = applyReplaceStep(grid, removeCells, weights);
+    } else {
+      dropIn = Array.from(removedByCol.entries()).map(([col, count]) => ({
+        col,
+        symbols: Array.from({ length: count }, () => pickSymbol(weights))
+      }));
+      nextGrid = applyCascadeStep(grid, { removeCells, dropIn });
+    }
 
     const multiplier = getMatchMultiplier(targetCluster.symbol, targetCluster.cells.length);
     const winStep = multiplier <= 0 ? 0 : Math.round(bet * multiplier);
 
     const bonus = targetCluster.symbol === "N";
-    const nextGrid = applyCascadeStep(grid, { removeCells, dropIn });
     cascades.push({ removeCells, dropIn, winStep, bonus, gridAfter: nextGrid });
     totalWin += winStep;
     grid = nextGrid;
@@ -244,8 +266,10 @@ export function buildPlayOutcome({ mode, bet }) {
   const boardMode = mode === "nivel2" ? "nivel2" : "nivel1";
   const size = boardMode === "nivel2" ? LEVEL_TWO_SIZE : LEVEL_ONE_SIZE;
   const weights = boardMode === "nivel2" ? LEVEL_TWO_WEIGHTS : LEVEL_ONE_WEIGHTS;
+  const includeDiagonals = boardMode === "nivel1";
+  const fillMode = boardMode === "nivel1" ? "replace" : "cascade";
   const grid0 = buildGrid(size.rows, size.cols, weights);
-  const { cascades, totalWin } = buildCascades(grid0, weights, bet);
+  const { cascades, totalWin } = buildCascades(grid0, weights, bet, { includeDiagonals, fillMode });
 
   return {
     playId: `${mode}-${Date.now()}`,
