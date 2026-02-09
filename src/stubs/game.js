@@ -3,6 +3,11 @@ import { MATCH_PAYTABLES, PAY_SYMBOLS, getMatchMultiplier } from "./paytable.js"
 const LEVEL_ONE_SIZE = { rows: 3, cols: 5 };
 const LEVEL_TWO_SIZE = { rows: 7, cols: 5 };
 const MAX_CASCADES = 20;
+const BONUS_TRIGGER_SYMBOL = "N";
+const FORCE_BONUS = true;
+const BONUS_LEVEL_ONE_MULTIPLIERS = [2, 3, 5, 8];
+const BONUS_LEVEL_TWO_MULTIPLIERS = [4, 6, 8, 10, 12, 16, 20, 30, 40];
+const BONUS_MAX_ROUNDS = 25;
 const BET_VALUES = [200, 300, 400, 500, 1000, 2000, 5000, 10000];
 const JACKPOTS = { mayor: 34906, menor: 3700 };
 const AVAILABLE_MODES = ["nivel1", "nivel2", "pack"];
@@ -51,6 +56,21 @@ function buildGrid(rows, cols, weights) {
   return Array.from({ length: rows }, () =>
     Array.from({ length: cols }, () => pickSymbol(weights))
   );
+}
+
+function countSymbolOnGrid(grid, symbol) {
+  return grid.reduce((acc, row) => acc + row.filter((cell) => cell === symbol).length, 0);
+}
+
+function buildBonusData(mode, triggerCount) {
+  const multipliers = mode === "nivel1" ? BONUS_LEVEL_ONE_MULTIPLIERS : BONUS_LEVEL_TWO_MULTIPLIERS;
+  return {
+    mode,
+    triggerCount,
+    prizeMultipliers: multipliers,
+    endCode: "TERMINO_DE_BONUS",
+    maxRounds: BONUS_MAX_ROUNDS
+  };
 }
 
 function findClusters(grid, { includeDiagonals = false } = {}) {
@@ -161,12 +181,33 @@ function applyReplaceStep(grid, removeCells, weights) {
   return result;
 }
 
-function buildCascades(grid0, weights, bet, { includeDiagonals = false, fillMode = "cascade" } = {}) {
+function buildCascades(
+  grid0,
+  weights,
+  bet,
+  { includeDiagonals = false, fillMode = "cascade", bonusMode = "nivel1" } = {}
+) {
   const cascades = [];
   let totalWin = 0;
   let grid = grid0;
 
   for (let stepIndex = 0; stepIndex < MAX_CASCADES; stepIndex += 1) {
+    const bonusCount = countSymbolOnGrid(grid, BONUS_TRIGGER_SYMBOL);
+    const shouldTriggerBonusByGrid = bonusMode === "nivel1" ? bonusCount >= 1 : bonusCount >= 3;
+    const shouldTriggerBonus = FORCE_BONUS || shouldTriggerBonusByGrid;
+    if (shouldTriggerBonus) {
+      const triggerCount = shouldTriggerBonusByGrid ? bonusCount : bonusMode === "nivel1" ? 1 : 3;
+      cascades.push({
+        removeCells: [],
+        dropIn: [],
+        winStep: 0,
+        bonus: true,
+        bonusData: buildBonusData(bonusMode, triggerCount),
+        gridAfter: grid
+      });
+      break;
+    }
+
     const clusters = findClusters(grid, { includeDiagonals });
     if (clusters.length === 0) break;
 
@@ -202,8 +243,7 @@ function buildCascades(grid0, weights, bet, { includeDiagonals = false, fillMode
     const multiplier = getMatchMultiplier(targetCluster.symbol, targetCluster.cells.length);
     const winStep = multiplier <= 0 ? 0 : Math.round(bet * multiplier);
 
-    const bonus = targetCluster.symbol === "N";
-    cascades.push({ removeCells, dropIn, winStep, bonus, gridAfter: nextGrid });
+    cascades.push({ removeCells, dropIn, winStep, gridAfter: nextGrid });
     totalWin += winStep;
     grid = nextGrid;
   }
@@ -269,7 +309,11 @@ export function buildPlayOutcome({ mode, bet }) {
   const includeDiagonals = boardMode === "nivel1";
   const fillMode = boardMode === "nivel1" ? "replace" : "cascade";
   const grid0 = buildGrid(size.rows, size.cols, weights);
-  const { cascades, totalWin } = buildCascades(grid0, weights, bet, { includeDiagonals, fillMode });
+  const { cascades, totalWin } = buildCascades(grid0, weights, bet, {
+    includeDiagonals,
+    fillMode,
+    bonusMode: boardMode
+  });
 
   return {
     playId: `${mode}-${Date.now()}`,
