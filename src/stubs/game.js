@@ -1,6 +1,6 @@
 import { MATCH_PAYTABLES, PAY_SYMBOLS, getMatchMultiplier } from "./paytable.js";
 
-const LEVEL_ONE_SIZE = { rows: 5, cols: 4 };
+const LEVEL_ONE_SIZE = { rows: 4, cols: 5 };
 const LEVEL_TWO_SIZE = { rows: 7, cols: 5 };
 const MAX_CASCADES = 20;
 const BET_VALUES = [200, 300, 400, 500, 1000, 2000, 5000, 10000];
