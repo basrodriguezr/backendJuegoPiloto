@@ -4,6 +4,8 @@ const LEVEL_ONE_SIZE = { rows: 3, cols: 5 };
 const LEVEL_TWO_SIZE = { rows: 7, cols: 5 };
 const MAX_CASCADES = 20;
 const BONUS_TRIGGER_SYMBOL = "N";
+const LEVEL_ONE_BONUS_TRIGGER_COUNT = 2;
+const LEVEL_TWO_BONUS_TRIGGER_COUNT = 3;
 const BONUS_LEVEL_ONE_MULTIPLIERS = [2, 3, 5, 8];
 const BONUS_LEVEL_TWO_MULTIPLIERS = [4, 6, 8, 10, 12, 16, 20, 30, 40];
 const BONUS_MAX_ROUNDS = 25;
@@ -76,17 +78,22 @@ function buildBonusData(mode, triggerCount) {
   };
 }
 
-function findClusters(grid, { includeDiagonals = false } = {}) {
+function findClusters(grid, { includeDiagonals = false, excludedSymbols = [] } = {}) {
   const rows = grid.length;
   const cols = grid[0] ? grid[0].length : 0;
   const visited = Array.from({ length: rows }, () => Array.from({ length: cols }, () => false));
   const clusters = [];
+  const excluded = new Set(excludedSymbols);
 
   for (let row = 0; row < rows; row += 1) {
     for (let col = 0; col < cols; col += 1) {
       if (visited[row][col]) continue;
       const symbol = grid[row][col];
       if (!symbol) {
+        visited[row][col] = true;
+        continue;
+      }
+      if (excluded.has(symbol)) {
         visited[row][col] = true;
         continue;
       }
@@ -193,27 +200,9 @@ function buildCascades(
   const cascades = [];
   let totalWin = 0;
   let grid = grid0;
-  let bonusEvaluated = false;
 
   for (let stepIndex = 0; stepIndex < MAX_CASCADES; stepIndex += 1) {
-    if (!bonusEvaluated) {
-      const bonusCount = countSymbolOnGrid(grid, BONUS_TRIGGER_SYMBOL);
-      const shouldTriggerBonus = bonusMode === "nivel1" ? bonusCount >= 1 : bonusCount >= 3;
-      if (shouldTriggerBonus) {
-        cascades.push({
-          removeCells: [],
-          dropIn: [],
-          winStep: 0,
-          bonus: true,
-          bonusData: buildBonusData(bonusMode, bonusCount),
-          gridAfter: grid
-        });
-        break;
-      }
-      bonusEvaluated = true;
-    }
-
-    const clusters = findClusters(grid, { includeDiagonals });
+    const clusters = findClusters(grid, { includeDiagonals, excludedSymbols: [BONUS_TRIGGER_SYMBOL] });
     if (clusters.length === 0) break;
 
     clusters.sort((a, b) => {
@@ -251,6 +240,20 @@ function buildCascades(
     cascades.push({ removeCells, dropIn, winStep, gridAfter: nextGrid });
     totalWin += winStep;
     grid = nextGrid;
+  }
+
+  const bonusCount = countSymbolOnGrid(grid, BONUS_TRIGGER_SYMBOL);
+  const bonusThreshold = bonusMode === "nivel1" ? LEVEL_ONE_BONUS_TRIGGER_COUNT : LEVEL_TWO_BONUS_TRIGGER_COUNT;
+  const shouldTriggerBonus = bonusCount >= bonusThreshold;
+  if (shouldTriggerBonus) {
+    cascades.push({
+      removeCells: [],
+      dropIn: [],
+      winStep: 0,
+      bonus: true,
+      bonusData: buildBonusData(bonusMode, bonusCount),
+      gridAfter: grid
+    });
   }
 
   return { cascades, totalWin };
