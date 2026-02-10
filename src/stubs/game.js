@@ -67,11 +67,26 @@ function countSymbolOnGrid(grid, symbol) {
   return grid.reduce((acc, row) => acc + row.filter((cell) => cell === symbol).length, 0);
 }
 
-function buildBonusData(mode, triggerCount) {
+function collectTriggerCells(grid, symbol, limit) {
+  const cells = [];
+  for (let row = 0; row < grid.length; row += 1) {
+    for (let col = 0; col < (grid[row]?.length ?? 0); col += 1) {
+      if (grid[row][col] !== symbol) continue;
+      cells.push({ row, col });
+      if (cells.length >= limit) {
+        return cells;
+      }
+    }
+  }
+  return cells;
+}
+
+function buildBonusData(mode, triggerCells) {
   const multipliers = mode === "nivel1" ? BONUS_LEVEL_ONE_MULTIPLIERS : BONUS_LEVEL_TWO_MULTIPLIERS;
   return {
     mode,
-    triggerCount,
+    triggerCount: triggerCells.length,
+    triggerCells,
     prizeMultipliers: multipliers,
     endCode: "TERMINO_DE_BONUS",
     maxRounds: BONUS_MAX_ROUNDS
@@ -246,12 +261,13 @@ function buildCascades(
   const bonusThreshold = bonusMode === "nivel1" ? LEVEL_ONE_BONUS_TRIGGER_COUNT : LEVEL_TWO_BONUS_TRIGGER_COUNT;
   const shouldTriggerBonus = bonusCount >= bonusThreshold;
   if (shouldTriggerBonus) {
+    const triggerCells = collectTriggerCells(grid, BONUS_TRIGGER_SYMBOL, bonusThreshold);
     cascades.push({
       removeCells: [],
       dropIn: [],
       winStep: 0,
       bonus: true,
-      bonusData: buildBonusData(bonusMode, bonusCount),
+      bonusData: buildBonusData(bonusMode, triggerCells),
       gridAfter: grid
     });
   }
