@@ -4,7 +4,6 @@ const LEVEL_ONE_SIZE = { rows: 3, cols: 5 };
 const LEVEL_TWO_SIZE = { rows: 7, cols: 5 };
 const MAX_CASCADES = 20;
 const BONUS_TRIGGER_SYMBOL = "N";
-const FORCE_BONUS = true;
 const BONUS_LEVEL_ONE_MULTIPLIERS = [2, 3, 5, 8];
 const BONUS_LEVEL_TWO_MULTIPLIERS = [4, 6, 8, 10, 12, 16, 20, 30, 40];
 const BONUS_MAX_ROUNDS = 25;
@@ -193,16 +192,14 @@ function buildCascades(
 
   for (let stepIndex = 0; stepIndex < MAX_CASCADES; stepIndex += 1) {
     const bonusCount = countSymbolOnGrid(grid, BONUS_TRIGGER_SYMBOL);
-    const shouldTriggerBonusByGrid = bonusMode === "nivel1" ? bonusCount >= 1 : bonusCount >= 3;
-    const shouldTriggerBonus = FORCE_BONUS || shouldTriggerBonusByGrid;
+    const shouldTriggerBonus = bonusMode === "nivel1" ? bonusCount >= 1 : bonusCount >= 3;
     if (shouldTriggerBonus) {
-      const triggerCount = shouldTriggerBonusByGrid ? bonusCount : bonusMode === "nivel1" ? 1 : 3;
       cascades.push({
         removeCells: [],
         dropIn: [],
         winStep: 0,
         bonus: true,
-        bonusData: buildBonusData(bonusMode, triggerCount),
+        bonusData: buildBonusData(bonusMode, bonusCount),
         gridAfter: grid
       });
       break;
