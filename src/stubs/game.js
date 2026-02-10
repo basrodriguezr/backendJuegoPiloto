@@ -29,8 +29,12 @@ const COMMON_WEIGHTS = [
   { symbol: "N", weight: 2 }
 ];
 
-const LEVEL_ONE_WEIGHTS = COMMON_WEIGHTS;
-const LEVEL_TWO_WEIGHTS = COMMON_WEIGHTS;
+const LEVEL_ONE_WEIGHTS = COMMON_WEIGHTS.map((entry) =>
+  entry.symbol === "N" ? { ...entry, weight: 0.75 } : entry
+);
+const LEVEL_TWO_WEIGHTS = COMMON_WEIGHTS.map((entry) =>
+  entry.symbol === "N" ? { ...entry, weight: 1.0 } : entry
+);
 
 const PAYTABLE_ENTRIES = MATCH_PAYTABLES.map((entry) => ({
   symbol: entry.symbol,
@@ -189,20 +193,24 @@ function buildCascades(
   const cascades = [];
   let totalWin = 0;
   let grid = grid0;
+  let bonusEvaluated = false;
 
   for (let stepIndex = 0; stepIndex < MAX_CASCADES; stepIndex += 1) {
-    const bonusCount = countSymbolOnGrid(grid, BONUS_TRIGGER_SYMBOL);
-    const shouldTriggerBonus = bonusMode === "nivel1" ? bonusCount >= 1 : bonusCount >= 3;
-    if (shouldTriggerBonus) {
-      cascades.push({
-        removeCells: [],
-        dropIn: [],
-        winStep: 0,
-        bonus: true,
-        bonusData: buildBonusData(bonusMode, bonusCount),
-        gridAfter: grid
-      });
-      break;
+    if (!bonusEvaluated) {
+      const bonusCount = countSymbolOnGrid(grid, BONUS_TRIGGER_SYMBOL);
+      const shouldTriggerBonus = bonusMode === "nivel1" ? bonusCount >= 1 : bonusCount >= 3;
+      if (shouldTriggerBonus) {
+        cascades.push({
+          removeCells: [],
+          dropIn: [],
+          winStep: 0,
+          bonus: true,
+          bonusData: buildBonusData(bonusMode, bonusCount),
+          gridAfter: grid
+        });
+        break;
+      }
+      bonusEvaluated = true;
     }
 
     const clusters = findClusters(grid, { includeDiagonals });
