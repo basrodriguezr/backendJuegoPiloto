@@ -30,7 +30,7 @@ const COMMON_WEIGHTS = [
 ];
 
 const LEVEL_ONE_WEIGHTS = COMMON_WEIGHTS.map((entry) =>
-  entry.symbol === "N" ? { ...entry, weight: 0.75 } : entry
+  entry.symbol === "N" ? { ...entry, weight: 0.05 } : entry
 );
 const LEVEL_TWO_WEIGHTS = COMMON_WEIGHTS.map((entry) =>
   entry.symbol === "N" ? { ...entry, weight: 1.0 } : entry
