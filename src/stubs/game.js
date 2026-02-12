@@ -342,65 +342,7 @@ function resolveLevelRules(gameConfig, boardMode) {
   };
 }
 
-function buildReelCascades(grid0, bet, rules) {
-  const rows = grid0.length;
-  const cols = grid0[0]?.length ?? 0;
-  const triggerSymbol = rules.bonus.triggerSymbol;
-  const excluded = new Set([...rules.excludedSymbols, triggerSymbol]);
-  const lineWins = [];
-
-  for (let row = 0; row < rows; row += 1) {
-    const symbol = grid0[row]?.[0];
-    if (!symbol || excluded.has(symbol)) continue;
-
-    let count = 1;
-    while (count < cols && grid0[row][count] === symbol) {
-      count += 1;
-    }
-    const multiplier = getMatchMultiplier(symbol, count);
-    if (multiplier <= 0) continue;
-
-    const winStep = Math.round(bet * multiplier);
-    if (winStep <= 0) continue;
-    lineWins.push({ row, symbol, count, winStep });
-  }
-
-  const totalWin = lineWins.reduce((acc, line) => acc + line.winStep, 0);
-  const cascades = [];
-  if (totalWin > 0) {
-    cascades.push({
-      removeCells: [],
-      dropIn: [],
-      winStep: totalWin,
-      lineWins,
-      gridAfter: grid0
-    });
-  }
-
-  if (triggerSymbol && rules.bonus.triggerCount > 0) {
-    const bonusCount = countSymbolOnGrid(grid0, triggerSymbol);
-    const shouldTriggerBonus = bonusCount >= rules.bonus.triggerCount;
-    if (shouldTriggerBonus) {
-      const triggerCells = collectTriggerCells(grid0, triggerSymbol, rules.bonus.triggerCount);
-      cascades.push({
-        removeCells: [],
-        dropIn: [],
-        winStep: 0,
-        bonus: true,
-        bonusData: buildBonusData(rules.mode, triggerCells, rules.bonus),
-        gridAfter: grid0
-      });
-    }
-  }
-
-  return { cascades, totalWin };
-}
-
-function buildCascades(grid0, weights, bet, rules) {
-  if (rules.engineType === "reels") {
-    return buildReelCascades(grid0, bet, rules);
-  }
-
+function buildClusterCascades(grid0, weights, bet, rules) {
   const cascades = [];
   let totalWin = 0;
   let grid = grid0;
@@ -469,6 +411,14 @@ function buildCascades(grid0, weights, bet, rules) {
   }
 
   return { cascades, totalWin };
+}
+
+function buildCascades(grid0, weights, bet, rules) {
+  if (rules.engineType === "reels") {
+    // Reels affects board presentation; wins are still resolved as disappearing clusters.
+    return buildClusterCascades(grid0, weights, bet, rules);
+  }
+  return buildClusterCascades(grid0, weights, bet, rules);
 }
 
 export function buildConfig({ clientCode, companyCode, gameCode }) {
