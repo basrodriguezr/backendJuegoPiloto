@@ -330,11 +330,20 @@ function resolveLevelRules(gameConfig, boardMode) {
     : defaults.excludedSymbols;
 
   return {
-    engineType: custom.engineType === "reels" ? "reels" : "cluster",
+    engineType: "cluster",
     rows: asPositiveInt(custom.rows, defaults.rows),
     cols: asPositiveInt(custom.cols, defaults.cols),
     includeDiagonals: asBoolean(custom.includeDiagonals, defaults.includeDiagonals),
-    fillMode: custom.fillMode === "replace" ? "replace" : custom.fillMode === "cascade" ? "cascade" : defaults.fillMode,
+    fillMode:
+      custom.fillMode === "replace"
+        ? "replace"
+        : custom.fillMode === "cascade"
+          ? "cascade"
+          : custom.fillMode === "rodillo"
+            ? "rodillo"
+            : custom.engineType === "reels"
+              ? "rodillo"
+              : defaults.fillMode,
     maxCascades: asPositiveInt(custom.maxCascades, defaults.maxCascades),
     matchMinCluster: asPositiveInt(custom.matchMinCluster, defaults.matchMinCluster, 2),
     excludedSymbols,
@@ -414,10 +423,6 @@ function buildClusterCascades(grid0, weights, bet, rules) {
 }
 
 function buildCascades(grid0, weights, bet, rules) {
-  if (rules.engineType === "reels") {
-    // Reels affects board presentation; wins are still resolved as disappearing clusters.
-    return buildClusterCascades(grid0, weights, bet, rules);
-  }
   return buildClusterCascades(grid0, weights, bet, rules);
 }
 
