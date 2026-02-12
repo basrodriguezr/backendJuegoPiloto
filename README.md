@@ -40,11 +40,32 @@ npm run dev
 
 - `GET /api/v1/health`
 - `GET /api/v1/game-config`
+- `GET /api/v1/admin/game-config` (requiere JWT)
+- `PUT /api/v1/admin/game-config` (requiere JWT)
 - `POST /api/v1/play`
 - `POST /api/v1/pack-play`
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/me`
+
+## Backoffice / Engine configurable
+
+La configuracion del motor de juego se guarda en `game_configs.config_json` e incluye `engine` con reglas por nivel:
+
+- `engine.levels.nivel1`
+- `engine.levels.nivel2`
+
+Campos principales:
+- `rows`, `cols`
+- `includeDiagonals`
+- `fillMode` (`replace`/`cascade`)
+- `maxCascades`
+- `matchMinCluster`
+- `excludedSymbols`
+- `bonus` (`triggerSymbol`, `triggerCount`, `prizeMultipliers`, `maxRounds`, `endCode`)
+- `modes[].weights` para pesos de simbolos
+
+Los endpoints de play (`/play`, `/pack-play`) leen esta config al vuelo, por lo que cambios guardados en backoffice afectan jugadas nuevas inmediatamente.
 
 ## WebSocket
 

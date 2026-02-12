@@ -3,16 +3,12 @@ import { MATCH_PAYTABLES, PAY_SYMBOLS, getMatchMultiplier } from "./paytable.js"
 const LEVEL_ONE_SIZE = { rows: 3, cols: 5 };
 const LEVEL_TWO_SIZE = { rows: 7, cols: 5 };
 const MAX_CASCADES = 20;
-const BONUS_TRIGGER_SYMBOL = "N";
-const LEVEL_ONE_BONUS_TRIGGER_COUNT = 2;
-const LEVEL_TWO_BONUS_TRIGGER_COUNT = 3;
-const BONUS_LEVEL_ONE_MULTIPLIERS = [2, 3, 5, 8];
-const BONUS_LEVEL_TWO_MULTIPLIERS = [4, 6, 8, 10, 12, 16, 20, 30, 40];
 const BONUS_MAX_ROUNDS = 25;
 const BET_VALUES = [200, 300, 400, 500, 1000, 2000, 5000, 10000];
 const JACKPOTS = { mayor: 34906, menor: 3700 };
 const AVAILABLE_MODES = ["nivel1", "nivel2", "pack"];
 const PACK_LEVELS = ["nivel1", "nivel2"];
+const DEFAULT_BONUS_END_CODE = "TERMINO_DE_BONUS";
 
 const COMMON_WEIGHTS = [
   { symbol: "A", weight: 6 },
@@ -44,8 +40,98 @@ const PAYTABLE_ENTRIES = MATCH_PAYTABLES.map((entry) => ({
   win: entry.matches[0] ? entry.matches[0].multiplier : 0
 }));
 
+const DEFAULT_ENGINE = {
+  rng: {
+    source: "math-random",
+    seed: null
+  },
+  levels: {
+    nivel1: {
+      rows: LEVEL_ONE_SIZE.rows,
+      cols: LEVEL_ONE_SIZE.cols,
+      includeDiagonals: true,
+      fillMode: "replace",
+      maxCascades: MAX_CASCADES,
+      matchMinCluster: 3,
+      excludedSymbols: ["N"],
+      bonus: {
+        triggerSymbol: "N",
+        triggerCount: 2,
+        prizeMultipliers: [2, 3, 5, 8],
+        maxRounds: BONUS_MAX_ROUNDS,
+        endCode: DEFAULT_BONUS_END_CODE
+      }
+    },
+    nivel2: {
+      rows: LEVEL_TWO_SIZE.rows,
+      cols: LEVEL_TWO_SIZE.cols,
+      includeDiagonals: false,
+      fillMode: "cascade",
+      maxCascades: MAX_CASCADES,
+      matchMinCluster: 3,
+      excludedSymbols: ["N"],
+      bonus: {
+        triggerSymbol: "N",
+        triggerCount: 3,
+        prizeMultipliers: [4, 6, 8, 10, 12, 16, 20, 30, 40],
+        maxRounds: BONUS_MAX_ROUNDS,
+        endCode: DEFAULT_BONUS_END_CODE
+      }
+    }
+  }
+};
+
+function asPositiveInt(value, fallback, min = 1) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  const rounded = Math.round(parsed);
+  return rounded >= min ? rounded : fallback;
+}
+
+function asPositiveNumber(value, fallback, min = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return parsed >= min ? parsed : fallback;
+}
+
+function asBoolean(value, fallback) {
+  if (typeof value === "boolean") return value;
+  return fallback;
+}
+
+function asSymbol(value, fallback) {
+  const symbol = typeof value === "string" ? value.trim().toUpperCase() : "";
+  if (symbol && PAY_SYMBOLS.includes(symbol)) return symbol;
+  return fallback;
+}
+
+function normalizeWeights(weights, fallback) {
+  const bySymbol = new Map();
+  (weights ?? []).forEach((entry) => {
+    const symbol = asSymbol(entry?.symbol, "");
+    const weight = asPositiveNumber(entry?.weight, 0, 0);
+    if (!symbol || weight <= 0) return;
+    bySymbol.set(symbol, weight);
+  });
+
+  const normalized = PAY_SYMBOLS.map((symbol) => ({
+    symbol,
+    weight: bySymbol.get(symbol) ?? 0
+  })).filter((entry) => entry.weight > 0);
+
+  if (normalized.length === 0) {
+    return fallback.map((entry) => ({ ...entry }));
+  }
+
+  return normalized;
+}
+
 function pickSymbol(weights) {
   const total = weights.reduce((acc, item) => acc + item.weight, 0);
+  if (total <= 0) {
+    return PAY_SYMBOLS[Math.floor(Math.random() * PAY_SYMBOLS.length)] ?? "A";
+  }
+
   const roll = Math.random() * total;
   let acc = 0;
   for (const item of weights) {
@@ -81,19 +167,21 @@ function collectTriggerCells(grid, symbol, limit) {
   return cells;
 }
 
-function buildBonusData(mode, triggerCells) {
-  const multipliers = mode === "nivel1" ? BONUS_LEVEL_ONE_MULTIPLIERS : BONUS_LEVEL_TWO_MULTIPLIERS;
+function buildBonusData(mode, triggerCells, bonusRules) {
   return {
     mode,
     triggerCount: triggerCells.length,
     triggerCells,
-    prizeMultipliers: multipliers,
-    endCode: "TERMINO_DE_BONUS",
-    maxRounds: BONUS_MAX_ROUNDS
+    prizeMultipliers: bonusRules.prizeMultipliers,
+    endCode: bonusRules.endCode,
+    maxRounds: bonusRules.maxRounds
   };
 }
 
-function findClusters(grid, { includeDiagonals = false, excludedSymbols = [] } = {}) {
+function findClusters(
+  grid,
+  { includeDiagonals = false, excludedSymbols = [], minCluster = 3 } = {}
+) {
   const rows = grid.length;
   const cols = grid[0] ? grid[0].length : 0;
   const visited = Array.from({ length: rows }, () => Array.from({ length: cols }, () => false));
@@ -152,7 +240,7 @@ function findClusters(grid, { includeDiagonals = false, excludedSymbols = [] } =
         });
       }
 
-      if (cells.length >= 3) {
+      if (cells.length >= minCluster) {
         clusters.push({ symbol, cells });
       }
     }
@@ -206,18 +294,64 @@ function applyReplaceStep(grid, removeCells, weights) {
   return result;
 }
 
-function buildCascades(
-  grid0,
-  weights,
-  bet,
-  { includeDiagonals = false, fillMode = "cascade", bonusMode = "nivel1" } = {}
-) {
+function resolveModeWeights(gameConfig, boardMode) {
+  const fallback = boardMode === "nivel2" ? LEVEL_TWO_WEIGHTS : LEVEL_ONE_WEIGHTS;
+  const modeConfig = (gameConfig?.modes ?? []).find((entry) => entry?.code === boardMode);
+  return normalizeWeights(modeConfig?.weights, fallback);
+}
+
+function resolveLevelRules(gameConfig, boardMode) {
+  const defaults = DEFAULT_ENGINE.levels[boardMode];
+  const custom = gameConfig?.engine?.levels?.[boardMode] ?? {};
+  const bonusCustom = custom.bonus ?? {};
+  const bonusDefaults = defaults.bonus;
+  const triggerSymbol = asSymbol(bonusCustom.triggerSymbol, bonusDefaults.triggerSymbol);
+
+  const resolvedBonus = {
+    triggerSymbol,
+    triggerCount: asPositiveInt(bonusCustom.triggerCount, bonusDefaults.triggerCount),
+    prizeMultipliers: Array.isArray(bonusCustom.prizeMultipliers) && bonusCustom.prizeMultipliers.length > 0
+      ? bonusCustom.prizeMultipliers
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0)
+      : bonusDefaults.prizeMultipliers,
+    maxRounds: asPositiveInt(bonusCustom.maxRounds, bonusDefaults.maxRounds),
+    endCode: typeof bonusCustom.endCode === "string" && bonusCustom.endCode.trim()
+      ? bonusCustom.endCode.trim()
+      : bonusDefaults.endCode
+  };
+
+  const excludedSymbols = Array.isArray(custom.excludedSymbols)
+    ? custom.excludedSymbols
+      .map((symbol) => asSymbol(symbol, ""))
+      .filter(Boolean)
+    : defaults.excludedSymbols;
+
+  return {
+    rows: asPositiveInt(custom.rows, defaults.rows),
+    cols: asPositiveInt(custom.cols, defaults.cols),
+    includeDiagonals: asBoolean(custom.includeDiagonals, defaults.includeDiagonals),
+    fillMode: custom.fillMode === "replace" ? "replace" : custom.fillMode === "cascade" ? "cascade" : defaults.fillMode,
+    maxCascades: asPositiveInt(custom.maxCascades, defaults.maxCascades),
+    matchMinCluster: asPositiveInt(custom.matchMinCluster, defaults.matchMinCluster, 2),
+    excludedSymbols,
+    bonus: resolvedBonus
+  };
+}
+
+function buildCascades(grid0, weights, bet, rules) {
   const cascades = [];
   let totalWin = 0;
   let grid = grid0;
+  const triggerSymbol = rules.bonus.triggerSymbol;
+  const excludedSymbols = Array.from(new Set([...rules.excludedSymbols, triggerSymbol]));
 
-  for (let stepIndex = 0; stepIndex < MAX_CASCADES; stepIndex += 1) {
-    const clusters = findClusters(grid, { includeDiagonals, excludedSymbols: [BONUS_TRIGGER_SYMBOL] });
+  for (let stepIndex = 0; stepIndex < rules.maxCascades; stepIndex += 1) {
+    const clusters = findClusters(grid, {
+      includeDiagonals: rules.includeDiagonals,
+      excludedSymbols,
+      minCluster: rules.matchMinCluster
+    });
     if (clusters.length === 0) break;
 
     clusters.sort((a, b) => {
@@ -239,7 +373,7 @@ function buildCascades(
     let dropIn = [];
     let nextGrid;
 
-    if (fillMode === "replace") {
+    if (rules.fillMode === "replace") {
       nextGrid = applyReplaceStep(grid, removeCells, weights);
     } else {
       dropIn = Array.from(removedByCol.entries()).map(([col, count]) => ({
@@ -257,19 +391,20 @@ function buildCascades(
     grid = nextGrid;
   }
 
-  const bonusCount = countSymbolOnGrid(grid, BONUS_TRIGGER_SYMBOL);
-  const bonusThreshold = bonusMode === "nivel1" ? LEVEL_ONE_BONUS_TRIGGER_COUNT : LEVEL_TWO_BONUS_TRIGGER_COUNT;
-  const shouldTriggerBonus = bonusCount >= bonusThreshold;
-  if (shouldTriggerBonus) {
-    const triggerCells = collectTriggerCells(grid, BONUS_TRIGGER_SYMBOL, bonusThreshold);
-    cascades.push({
-      removeCells: [],
-      dropIn: [],
-      winStep: 0,
-      bonus: true,
-      bonusData: buildBonusData(bonusMode, triggerCells),
-      gridAfter: grid
-    });
+  if (triggerSymbol && rules.bonus.triggerCount > 0) {
+    const bonusCount = countSymbolOnGrid(grid, triggerSymbol);
+    const shouldTriggerBonus = bonusCount >= rules.bonus.triggerCount;
+    if (shouldTriggerBonus) {
+      const triggerCells = collectTriggerCells(grid, triggerSymbol, rules.bonus.triggerCount);
+      cascades.push({
+        removeCells: [],
+        dropIn: [],
+        winStep: 0,
+        bonus: true,
+        bonusData: buildBonusData(rules.mode, triggerCells, rules.bonus),
+        gridAfter: grid
+      });
+    }
   }
 
   return { cascades, totalWin };
@@ -315,6 +450,7 @@ export function buildConfig({ clientCode, companyCode, gameCode }) {
       cols: LEVEL_TWO_SIZE.cols,
       symbols: PAY_SYMBOLS
     },
+    engine: DEFAULT_ENGINE,
     symbolPaytable: MATCH_PAYTABLES,
     branding: {
       logoUrl: "/logo.svg",
@@ -326,17 +462,14 @@ export function buildConfig({ clientCode, companyCode, gameCode }) {
   };
 }
 
-export function buildPlayOutcome({ mode, bet }) {
+export function buildPlayOutcome({ mode, bet, gameConfig }) {
   const boardMode = mode === "nivel2" ? "nivel2" : "nivel1";
-  const size = boardMode === "nivel2" ? LEVEL_TWO_SIZE : LEVEL_ONE_SIZE;
-  const weights = boardMode === "nivel2" ? LEVEL_TWO_WEIGHTS : LEVEL_ONE_WEIGHTS;
-  const includeDiagonals = boardMode === "nivel1";
-  const fillMode = boardMode === "nivel1" ? "replace" : "cascade";
-  const grid0 = buildGrid(size.rows, size.cols, weights);
+  const rules = resolveLevelRules(gameConfig, boardMode);
+  const weights = resolveModeWeights(gameConfig, boardMode);
+  const grid0 = buildGrid(rules.rows, rules.cols, weights);
   const { cascades, totalWin } = buildCascades(grid0, weights, bet, {
-    includeDiagonals,
-    fillMode,
-    bonusMode: boardMode
+    ...rules,
+    mode: boardMode
   });
 
   return {
@@ -349,10 +482,10 @@ export function buildPlayOutcome({ mode, bet }) {
   };
 }
 
-export function buildPackOutcome({ mode, bet, packSize, packLevel }) {
+export function buildPackOutcome({ mode, bet, packSize, packLevel, gameConfig }) {
   const resolvedLevel = mode === "nivel2" ? "nivel2" : mode === "nivel1" ? "nivel1" : packLevel;
   const plays = Array.from({ length: packSize }).map((_, idx) => {
-    const outcome = buildPlayOutcome({ mode: resolvedLevel, bet });
+    const outcome = buildPlayOutcome({ mode: resolvedLevel, bet, gameConfig });
     return {
       playId: `${outcome.playId}-${idx}`,
       mode: outcome.mode,

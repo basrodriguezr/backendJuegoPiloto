@@ -47,38 +47,64 @@ function createError(status, message) {
   return err;
 }
 
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function mergeDeep(base, override) {
+  if (!isPlainObject(base)) {
+    if (isPlainObject(override)) return { ...override };
+    if (Array.isArray(override)) return [...override];
+    return override;
+  }
+
+  const result = { ...base };
+  if (!isPlainObject(override)) {
+    return result;
+  }
+
+  Object.entries(override).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      result[key] = [...value];
+      return;
+    }
+    if (isPlainObject(value)) {
+      result[key] = mergeDeep(result[key], value);
+      return;
+    }
+    result[key] = value;
+  });
+
+  return result;
+}
+
 async function loadGameConfig({ clientCode = "demo", companyCode = "demo", gameCode = "e-instant" }) {
   const fallback = buildConfig({ clientCode, companyCode, gameCode });
   const result = await query(
-    "SELECT config_json FROM game_configs WHERE client_code = $1 AND game_code = $2 ORDER BY updated_at DESC LIMIT 1",
-    [clientCode, gameCode]
+    "SELECT config_json FROM game_configs WHERE client_code = $1 AND company_code = $2 AND game_code = $3 ORDER BY updated_at DESC LIMIT 1",
+    [clientCode, companyCode, gameCode]
   );
   if (result.rowCount > 0) {
     const stored = result.rows[0].config_json ?? {};
-    return {
-      ...fallback,
-      ...stored,
-      money: { ...fallback.money, ...(stored.money ?? {}) },
-      betOptions: { ...fallback.betOptions, ...(stored.betOptions ?? {}) },
-      board: { ...fallback.board, ...(stored.board ?? {}) },
-      branding: { ...fallback.branding, ...(stored.branding ?? {}) },
-      betValues: stored.betValues ?? fallback.betValues,
-      jackpots: stored.jackpots ?? fallback.jackpots,
-      availableModes: stored.availableModes ?? fallback.availableModes,
-      packLevels: stored.packLevels ?? fallback.packLevels,
-      symbolPaytable: stored.symbolPaytable ?? fallback.symbolPaytable,
-      modes: stored.modes ?? fallback.modes,
-      packSizes: stored.packSizes ?? fallback.packSizes
-    };
+    const merged = mergeDeep(fallback, stored);
+    merged.clientCode = clientCode;
+    merged.companyCode = companyCode;
+    merged.gameCode = gameCode;
+    return merged;
   }
   return fallback;
 }
 
-async function createPlay({ mode, bet, sessionId, clientCode, companyCode }) {
+async function createPlay({ mode, bet, sessionId, clientCode, companyCode, gameCode }) {
   if (!mode || !bet) {
     throw createError(400, "Invalid payload");
   }
-  const outcome = buildPlayOutcome({ mode, bet });
+  const config = await loadGameConfig({
+    clientCode: clientCode || "demo",
+    companyCode: companyCode || "demo",
+    gameCode: gameCode || "e-instant"
+  });
+  const outcome = buildPlayOutcome({ mode, bet, gameConfig: config });
   await query(
     "INSERT INTO plays (session_id, client_code, company_code, mode, bet, outcome_json) VALUES ($1, $2, $3, $4, $5, $6)",
     [sessionId || null, clientCode || null, companyCode || null, mode, bet, outcome]
@@ -86,12 +112,17 @@ async function createPlay({ mode, bet, sessionId, clientCode, companyCode }) {
   return outcome;
 }
 
-async function createPackPlay({ mode, bet, packSize, packLevel, sessionId, clientCode, companyCode }) {
+async function createPackPlay({ mode, bet, packSize, packLevel, sessionId, clientCode, companyCode, gameCode }) {
   if (!mode || !bet || !packSize) {
     throw createError(400, "Invalid payload");
   }
   const resolvedLevel = packLevel || "nivel1";
-  const outcome = buildPackOutcome({ mode, bet, packSize, packLevel: resolvedLevel });
+  const config = await loadGameConfig({
+    clientCode: clientCode || "demo",
+    companyCode: companyCode || "demo",
+    gameCode: gameCode || "e-instant"
+  });
+  const outcome = buildPackOutcome({ mode, bet, packSize, packLevel: resolvedLevel, gameConfig: config });
   await query(
     "INSERT INTO pack_plays (session_id, client_code, company_code, mode, pack_level, bet, pack_size, outcome_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     [sessionId || null, clientCode || null, companyCode || null, mode, resolvedLevel, bet, packSize, outcome]
@@ -181,6 +212,43 @@ app.get("/api/v1/game-config", async (req, res) => {
       gameCode: req.query.gameCode || "e-instant"
     });
     return res.json(config);
+  } catch (err) {
+    const status = err?.status || 500;
+    return res.status(status).json({ message: err?.message || "Server error" });
+  }
+});
+
+app.get("/api/v1/admin/game-config", authMiddleware, async (req, res) => {
+  try {
+    const clientCode = req.query.clientCode || "demo";
+    const companyCode = req.query.companyCode || "demo";
+    const gameCode = req.query.gameCode || "e-instant";
+    const config = await loadGameConfig({ clientCode, companyCode, gameCode });
+    return res.json(config);
+  } catch (err) {
+    const status = err?.status || 500;
+    return res.status(status).json({ message: err?.message || "Server error" });
+  }
+});
+
+app.put("/api/v1/admin/game-config", authMiddleware, async (req, res) => {
+  try {
+    const clientCode = req.body?.clientCode || "demo";
+    const companyCode = req.body?.companyCode || "demo";
+    const gameCode = req.body?.gameCode || "e-instant";
+    const config = req.body?.config;
+
+    if (!isPlainObject(config)) {
+      return res.status(400).json({ message: "config must be a JSON object" });
+    }
+
+    await query(
+      "INSERT INTO game_configs (client_code, company_code, game_code, config_json) VALUES ($1, $2, $3, $4)",
+      [clientCode, companyCode, gameCode, config]
+    );
+
+    const saved = await loadGameConfig({ clientCode, companyCode, gameCode });
+    return res.json({ ok: true, config: saved });
   } catch (err) {
     const status = err?.status || 500;
     return res.status(status).json({ message: err?.message || "Server error" });
